@@ -337,7 +337,7 @@ io.on('connection', (socket) => {
 
             // Execute Python
             // Timeout set to 2 seconds to prevent infinite loops
-            exec(`python3 ${tempFile}`, { timeout: 2000 }, (error, stdout, stderr) => {
+exec(`python3 ${tempFile}`, (error, stdout, stderr) => {
                 let result = '';
                 if (error) {
                     // Check if it was a timeout
