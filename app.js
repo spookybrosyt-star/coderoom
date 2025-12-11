@@ -336,8 +336,9 @@ io.on('connection', (socket) => {
             fs.writeFileSync(tempFile, data.code);
 
             // Execute Python
-            // Timeout set to 2 seconds to prevent infinite loops
-exec(`python3 ${tempFile}`, (error, stdout, stderr) => {
+            // Timeout set to somthing seconds to prevent infinite loops
+exec(`python3 ${tempFile}`, { timeout: 200000000000000000000000000000000 }, (error, stdout, stderr) => {
+
                 let result = '';
                 if (error) {
                     // Check if it was a timeout
