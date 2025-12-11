@@ -18,11 +18,11 @@ const PORT = process.env.PORT || 3000;
 
 // --- STATE ---
 const rooms = {};
-const PY_TEMPLATE = "# Python 3 environment\nprint('Hello from Code Station!')\n";
-const JS_TEMPLATE = "console.log('Hello from Code Station (Node)!');\n";
+const PY_TEMPLATE  = "# Python 3 environment\nprint('Hello from Code Station!')\n";
+const JS_TEMPLATE  = "console.log('Hello from Code Station (Node)!');\n";
 const HTML_TEMPLATE = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Preview</title></head>
-<body><h1 style="font-family: sans-serif;">Hello from Code Station!</h1></body></html>`;
+<body style="font-family:sans-serif;"><h1>Hello from Code Station!</h1></body></html>`;
 
 // --- EXECUTION CONFIG ---
 const MAX_OUTPUT_BYTES = 128 * 1024;
@@ -64,11 +64,14 @@ input,select{width:100%;padding:10px;background:#1e1e2e;border:1px solid #45475a
 #run-btn{background:#a6e3a1;color:#111;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;font-weight:bold;font-family:'JetBrains Mono';}
 #stop-btn{background:#f38ba8;color:#111;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;font-weight:bold;font-family:'JetBrains Mono';}
 select.slim{padding:6px 8px;font-size:0.9rem;}
-/* editor & output */
+/* editor/output container with resizer */
+#editor-output{flex:1;display:flex;flex-direction:column;min-height:0;}
 #code-editor{flex:1;background:#1e1e2e;color:#cdd6f4;border:none;padding:14px;font-family:'JetBrains Mono',monospace;font-size:15px;line-height:1.55;resize:none;outline:none;}
-#output-console{height:35%;background:#11111b;border-top:2px solid #313244;padding:12px;font-family:'JetBrains Mono',monospace;font-size:13px;overflow-y:auto;color:#babbf1;}
-.output-title{font-size:0.78rem;color:#6c7086;margin-bottom:6px;text-transform:uppercase;}
-#preview-frame{width:100%;height:100%;border:none;background:white;}
+#drag-bar{height:6px;cursor:row-resize;background:#181825;border-top:1px solid #313244;border-bottom:1px solid #313244;}
+#output-console{flex:0 0 38%;background:#11111b;padding:0;display:flex;flex-direction:column;min-height:120px;}
+.output-title{padding:8px 12px;font-size:0.78rem;color:#6c7086;text-transform:uppercase;border-bottom:1px solid #313244;}
+#output-text{flex:1;margin:0;padding:12px;font-family:'JetBrains Mono',monospace;font-size:13px;overflow-y:auto;color:#babbf1;white-space:pre-wrap;}
+#preview-frame{flex:1;border:none;width:100%;background:white;display:none;}
 /* chat */
 #messages{flex:1;overflow-y:auto;padding:12px;list-style:none;margin:0;display:flex;flex-direction:column;gap:8px;}
 .message{background:#313244;padding:8px 12px;border-radius:6px;font-size:0.9rem;}
@@ -104,7 +107,6 @@ select.slim{padding:6px 8px;font-size:0.9rem;}
   <div id="main-split">
     <div id="code-panel">
       <div id="tab-bar">
-        <!-- tabs injected -->
         <div id="add-tab">+ New Tab</div>
       </div>
       <div id="toolbar">
@@ -118,11 +120,15 @@ select.slim{padding:6px 8px;font-size:0.9rem;}
         <span id="file-label" style="color:#9aa3b5;font-size:0.85rem;">main.py</span>
         <span style="margin-left:auto;color:#6c7086;font-size:0.78rem;">Tabs sync across the room</span>
       </div>
-      <textarea id="code-editor" spellcheck="false"></textarea>
-      <div id="output-console">
-        <div class="output-title">Output / Preview</div>
-        <pre id="output-text" style="margin:0;">Waiting...</pre>
-        <iframe id="preview-frame" style="display:none;"></iframe>
+
+      <div id="editor-output">
+        <textarea id="code-editor" spellcheck="false"></textarea>
+        <div id="drag-bar"></div>
+        <div id="output-console">
+          <div class="output-title">Output / Preview</div>
+          <pre id="output-text">Waiting...</pre>
+          <iframe id="preview-frame"></iframe>
+        </div>
       </div>
     </div>
 
@@ -140,7 +146,7 @@ select.slim{padding:6px 8px;font-size:0.9rem;}
 <script>
 const socket = io();
 let currentUser=null, currentRoom=null;
-let tabs = []; // array of {id,name,lang,code,output}
+let tabs = []; // {id,name,lang,code,output}
 let activeTabId = null;
 
 const lobbyView=document.getElementById('lobby-view');
@@ -153,6 +159,11 @@ const errorMsg=document.getElementById('error-msg');
 const tabBar=document.getElementById('tab-bar');
 const langSelect=document.getElementById('lang-select');
 const fileLabel=document.getElementById('file-label');
+const outputConsole=document.getElementById('output-console');
+const dragBar=document.getElementById('drag-bar');
+const editorOutput=document.getElementById('editor-output');
+
+function uid(){ return 'tab-' + Math.random().toString(36).slice(2,8) + Date.now().toString(36); }
 
 function togglePass(){
   document.getElementById('pass-group').style.display =
@@ -172,8 +183,7 @@ function joinRoom(){
 socket.on('join-success',(data)=>{
   lobbyView.style.display='none'; roomView.style.display='flex'; roomView.style.flexDirection='column';
   document.getElementById('room-display').innerText = \`Room: \${currentRoom}\`;
-  tabs = data.tabs;
-  if(!tabs.length){tabs=[{id:crypto.randomUUID(),name:'main.py',lang:'python',code:'',output:''}];}
+  tabs = data.tabs && data.tabs.length ? data.tabs : [makeDefaultTab()];
   activeTabId = tabs[0].id;
   renderTabs();
   loadActiveTab();
@@ -183,10 +193,7 @@ socket.on('join-error',(msg)=>errorMsg.innerText=msg);
 
 socket.on('chat-msg',addMsg);
 socket.on('code-update',({tabId,code})=>{
-  if(tabId!==activeTabId){ // update background tabs silently
-    const t=tabs.find(t=>t.id===tabId); if(t) t.code=code;
-    return;
-  }
+  if(tabId!==activeTabId){ const t=tabs.find(t=>t.id===tabId); if(t) t.code=code; return; }
   if(editor.value!==code){
     const s=editor.selectionStart, e=editor.selectionEnd;
     editor.value=code; editor.setSelectionRange(s,e);
@@ -194,9 +201,7 @@ socket.on('code-update',({tabId,code})=>{
 });
 socket.on('output-update',({tabId,text})=>{
   const t=tabs.find(t=>t.id===tabId); if(t) t.output=text;
-  if(tabId===activeTabId){
-    showOutput(t.lang,text);
-  }
+  if(tabId===activeTabId){ showOutput(t.lang,text); }
 });
 socket.on('tabs-update',(serverTabs)=>{
   tabs=serverTabs;
@@ -214,6 +219,9 @@ function addMsg(msg){
 }
 
 // --- tabs ---
+function makeDefaultTab(){
+  return {id:uid(),name:'main.py',lang:'python',code:PY_TEMPLATE,output:''};
+}
 function renderTabs(){
   Array.from(tabBar.querySelectorAll('.tab')).forEach(n=>n.remove());
   tabs.forEach(tab=>{
@@ -225,9 +233,8 @@ function renderTabs(){
   });
 }
 document.getElementById('add-tab').onclick=()=>{
-  const id=crypto.randomUUID();
-  const newTab={id,name:'main.py',lang:'python',code:PY_TEMPLATE,output:''};
-  tabs.push(newTab); activeTabId=id; syncTabs(); renderTabs(); loadActiveTab();
+  const newTab = {id:uid(),name:'main.py',lang:'python',code:PY_TEMPLATE,output:''};
+  tabs.push(newTab); activeTabId=newTab.id; syncTabs(); renderTabs(); loadActiveTab();
 };
 
 function changeLang(e){
@@ -235,8 +242,9 @@ function changeLang(e){
   t.lang=e.target.value;
   t.name = t.lang==='python'?'main.py':t.lang==='javascript'?'app.js':'index.html';
   fileLabel.innerText=t.name;
+  if(t.lang==='html' && t.code.trim()==='') t.code=HTML_TEMPLATE;
   syncTabs();
-  loadActiveTab(); // updates preview visibility
+  loadActiveTab();
 }
 
 // --- editor sync ---
@@ -272,7 +280,6 @@ function runCode(){
   t.output="Running...";
   showOutput(t.lang,t.output);
   if(t.lang==='html'){
-    // just render
     previewFrame.srcdoc=t.code;
     t.output="Rendered preview.";
     return;
@@ -284,8 +291,29 @@ function stopCode(){
   socket.emit('stop-code',{room:currentRoom,tabId:t.id});
 }
 
-// --- sync tabs to server ---
+// --- tabs sync ---
 function syncTabs(){ socket.emit('tabs-sync',{room:currentRoom,tabs}); }
+
+// --- resizable output ---
+let isDragging=false,startY=0,startEditorH=0,startOutH=0;
+dragBar.addEventListener('mousedown',(e)=>{
+  isDragging=true; startY=e.clientY;
+  startEditorH=editor.offsetHeight; startOutH=outputConsole.offsetHeight;
+  document.body.style.userSelect='none';
+});
+window.addEventListener('mousemove',(e)=>{
+  if(!isDragging) return;
+  const dy=e.clientY-startY;
+  const newEditorH=startEditorH+dy;
+  const newOutH=startOutH-dy;
+  const min=120;
+  if(newEditorH<min || newOutH<min) return;
+  editor.style.flex='0 0 '+newEditorH+'px';
+  outputConsole.style.flex='0 0 '+newOutH+'px';
+});
+window.addEventListener('mouseup',()=>{
+  if(isDragging){ isDragging=false; document.body.style.userSelect=''; }
+});
 </script>
 </body>
 </html>
@@ -321,9 +349,7 @@ io.on('connection',(socket)=>{
         type,
         password:pass,
         messages:[],
-        tabs:[
-          {id:'tab-1',name:'main.py',lang:'python',code:PY_TEMPLATE,output:''}
-        ]
+        tabs:[{id:'tab-1',name:'main.py',lang:'python',code:PY_TEMPLATE,output:''}]
       };
     }
     const target=rooms[room];
@@ -359,7 +385,6 @@ io.on('connection',(socket)=>{
     const room=socket.data.room; if(!room||!rooms[room])return;
     const tab=rooms[room].tabs.find(t=>t.id===tabId); if(!tab)return;
 
-    // kill existing run
     const key=`${room}|${tabId}`;
     if(runningProcs.has(key)){ runningProcs.get(key).kill('SIGTERM'); runningProcs.delete(key); }
 
@@ -422,7 +447,6 @@ io.on('connection',(socket)=>{
       const msg={user:'System',text:`${user||'A user'} left.`};
       rooms[room].messages.push(msg); io.to(room).emit('chat-msg',msg);
     }
-    // clean any running procs for this socket's room (best-effort)
     if(room){
       for(const [key,proc] of runningProcs.entries()){
         if(key.startsWith(room+"|")){ proc.kill('SIGTERM'); runningProcs.delete(key); }
@@ -431,4 +455,4 @@ io.on('connection',(socket)=>{
   });
 });
 
-server.listen(PORT,()=>console.log(`Code Station running on port ${PORT}`));
+server.listen(PORT,()=>console.log(\`Code Station running on port \${PORT}\`));
