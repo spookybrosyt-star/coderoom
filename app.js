@@ -199,8 +199,13 @@ socket.on('output-update',({tabId,text})=>{
   if(tabId===activeTabId){ showOutput(t.lang,text); }
 });
 socket.on('tabs-update',(serverTabs)=>{
-  tabs=serverTabs;
-  if(!tabs.find(t=>t.id===activeTabId) && tabs.length) activeTabId=tabs[0].id;
+  const prevCount = tabs.length;
+  tabs = serverTabs;
+  if (tabs.length > prevCount) {
+    activeTabId = tabs[tabs.length - 1].id; // select newly added tab
+  } else if (!tabs.find(t=>t.id===activeTabId) && tabs.length) {
+    activeTabId = tabs[0].id;
+  }
   renderTabs(); loadActiveTab();
 });
 
@@ -228,8 +233,7 @@ function renderTabs(){
   });
 }
 document.getElementById('add-tab').onclick=()=>{
-  const newTab = {id:uid(),name:'main.py',lang:'python',code:PY_TEMPLATE,output:''};
-  tabs.push(newTab); activeTabId=newTab.id; syncTabs(); renderTabs(); loadActiveTab();
+  socket.emit('add-tab',{room:currentRoom});
 };
 
 function changeLang(e){
@@ -356,6 +360,19 @@ io.on('connection',(socket)=>{
     target.messages.push(joinMsg); io.to(room).emit('chat-msg',joinMsg);
   });
 
+  socket.on('add-tab',({room})=>{
+    if(!rooms[room]) return;
+    const newTab = {
+      id: 'tab-' + Date.now().toString(36),
+      name: 'main.py',
+      lang: 'python',
+      code: PY_TEMPLATE,
+      output: ''
+    };
+    rooms[room].tabs.push(newTab);
+    io.to(room).emit('tabs-update', rooms[room].tabs);
+  });
+
   socket.on('send-msg',(data)=>{
     const room=socket.data.room; if(!room||!rooms[room])return;
     const payload={...data}; rooms[room].messages.push(payload);
@@ -402,7 +419,7 @@ io.on('connection',(socket)=>{
         if(!chunk)return;
         collected+=chunk;
         if(collected.length>MAX_OUTPUT_BYTES){
-          collected=collected.slice(0,MAX_OUTPUT_BYTES)+"\n[output truncated]";
+          collected=collected.slice(0,MAX_OUTPUT_BYTES)+"\\n[output truncated]";
           child.kill('SIGTERM');
         }
         tab.output=collected;
