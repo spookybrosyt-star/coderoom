@@ -1,6 +1,3 @@
-I escaped the backticks in my previous reply; when rendered to a real file those backslashes make the JS invalid. Below is a **clean, fully corrected `app.js`** with normal backticks and string literals (no escaping needed). Replace your file entirely with this version and redeploy.
-
-```js
 /* 
    -------------------------------------------------------
    CODE STATION PRO - PYTHON & ROOMS
@@ -395,6 +392,3 @@ io.on('connection', (socket) => {
 server.listen(PORT, () => {
     console.log(`Python Station running on port ${PORT}`);
 });
-```
-
-**Why the error happened:** I had escaped backticks (`\``) in the server code lines; outside a string that makes an invalid token. This version uses plain backticks and standard strings, so it parses correctly on Node 25. Redeploy with this file and it should start cleanly.
