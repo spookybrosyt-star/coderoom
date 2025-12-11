@@ -17,12 +17,12 @@ const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 
 // --- STATE MANAGEMENT ---
-// In-memory storage for rooms (Data resets if server restarts)
-// Structure: { roomName: { type: 'public/private', password: '...', code: '...', messages: [], output: '' } }
 const rooms = {}; 
-
-// Default Python Template
 const PY_TEMPLATE = "# Python 3 environment\nprint('Hello from Code Station!')\n\ndef add(a, b):\n    return a + b\n\nprint(add(5, 10))";
+
+// --- EXECUTION CONFIG ---
+const MAX_OUTPUT_BYTES = 128 * 1024;   // cap output we store/broadcast
+const runningProcs = new Map();        // room -> child process
 
 // --- HTML FRONTEND (Embedded) ---
 const HTML_CONTENT = `
@@ -66,6 +66,8 @@ const HTML_CONTENT = `
         #toolbar { padding: 10px; background: #181825; display: flex; gap: 10px; border-bottom: 1px solid #313244; }
         #run-btn { background: #a6e3a1; color: #111; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; font-family: 'JetBrains Mono'; }
         #run-btn:hover { background: #94e2d5; }
+        #stop-btn { background: #f38ba8; color: #111; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; font-family: 'JetBrains Mono'; }
+        #stop-btn:hover { background: #eba0ac; }
 
         #code-editor { flex: 2; background-color: #1e1e2e; color: #cdd6f4; border: none; padding: 15px; font-family: 'JetBrains Mono', monospace; font-size: 15px; line-height: 1.6; resize: none; outline: none; }
         
@@ -130,6 +132,7 @@ const HTML_CONTENT = `
             <div id="code-section">
                 <div id="toolbar">
                     <button id="run-btn" onclick="runCode()">▶ Run Code</button>
+                    <button id="stop-btn" onclick="stopCode()">■ Stop</button>
                     <span style="color:#6c7086; font-size: 0.8rem; align-self:center; margin-left:auto;">Auto-saves to room</span>
                 </div>
                 <textarea id="code-editor" spellcheck="false" placeholder="# Write Python code here..."></textarea>
@@ -189,7 +192,6 @@ const HTML_CONTENT = `
         // --- SOCKET LISTENERS ---
         socket.on('join-success', (data) => {
             lobbyView.style.display = 'none';
-            roomView.style.display = 'block'; // Make sure this is flex in CSS if needed, block acts as container
             roomView.style.display = 'flex'; 
             roomView.style.flexDirection = 'column';
 
@@ -249,6 +251,11 @@ const HTML_CONTENT = `
             socket.emit('run-code', { room: currentRoom, code: editor.value });
         }
 
+        function stopCode() {
+            socket.emit('stop-code', { room: currentRoom });
+            outputText.innerText = "Stopping...";
+        }
+
         // Sync Code typing
         editor.addEventListener('input', () => {
             socket.emit('type-code', { room: currentRoom, code: editor.value });
@@ -265,104 +272,123 @@ app.get('/', (req, res) => {
 
 // --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
-    
-    socket.on('join-room', ({ user, room, type, pass }) => {
-        // Create room if it doesn't exist
-        if (!rooms[room]) {
-            rooms[room] = { 
-                type, 
-                password: pass, 
-                code: PY_TEMPLATE, 
-                messages: [], 
-                output: '' 
-            };
-        }
+  socket.on('join-room', ({ user, room, type, pass }) => {
+    if (!rooms[room]) {
+      rooms[room] = { type, password: pass, code: PY_TEMPLATE, messages: [], output: '' };
+    }
+    const targetRoom = rooms[room];
 
-        const targetRoom = rooms[room];
+    if (targetRoom.type === 'private' && targetRoom.password !== pass) {
+      socket.emit('join-error', 'Wrong Password!');
+      return;
+    }
 
-        // Check password if private
-        if (targetRoom.type === 'private' && targetRoom.password !== pass) {
-            socket.emit('join-error', 'Wrong Password!');
-            return;
-        }
+    socket.join(room);
+    socket.data.room = room;
+    socket.data.user = user;
+    socket.emit('join-success', targetRoom);
 
-        // Join
-        socket.join(room);
-        socket.emit('join-success', targetRoom);
-        
-        // Notify others
-        const joinMsg = { user: 'System', text: `${user} joined.` };
-        targetRoom.messages.push(joinMsg);
-        io.to(room).emit('chat-msg', joinMsg);
+    const joinMsg = { user: 'System', text: \`\${user} joined.\` };
+    targetRoom.messages.push(joinMsg);
+    io.to(room).emit('chat-msg', joinMsg);
+  });
 
-        // --- EVENTS INSIDE ROOM ---
-        
-        // 1. Chat
-        socket.on('send-msg', (data) => {
-            if (rooms[data.room]) {
-                rooms[data.room].messages.push(data);
-                // Limit history
-                if (rooms[data.room].messages.length > 50) rooms[data.room].messages.shift();
-                io.to(data.room).emit('chat-msg', data);
-            }
-        });
+  socket.on('send-msg', (data) => {
+    const room = socket.data.room;
+    if (!room || !rooms[room]) return;
+    const payload = { ...data, room };
+    rooms[room].messages.push(payload);
+    if (rooms[room].messages.length > 50) rooms[room].messages.shift();
+    io.to(room).emit('chat-msg', payload);
+  });
 
-        // 2. Code Typing
-        socket.on('type-code', (data) => {
-            if (rooms[data.room]) {
-                rooms[data.room].code = data.code;
-                socket.to(data.room).emit('code-update', data.code);
-            }
-        });
+  socket.on('type-code', (data) => {
+    const room = socket.data.room;
+    if (!room || !rooms[room]) return;
+    rooms[room].code = data.code;
+    socket.to(room).emit('code-update', data.code);
+  });
 
-        // 3. Run Python Code
-        socket.on('run-code', (data) => {
-            const roomData = rooms[data.room];
-            if (!roomData) return;
+  socket.on('run-code', (data) => {
+    const room = socket.data.room;
+    const roomData = rooms[room];
+    if (!roomData) return;
 
-            // SECURITY FILTER (Very Basic)
-            const forbidden = ['import os', 'import sys', 'import subprocess', 'exec(', 'eval(', 'open('];
-            const hasForbidden = forbidden.some(word => data.code.includes(word));
+    // kill previous run if still active
+    if (runningProcs.has(room)) {
+      runningProcs.get(room).kill('SIGTERM');
+      runningProcs.delete(room);
+    }
 
-            if (hasForbidden) {
-                const errorText = "Security Error: File system access and shells are disabled.";
-                roomData.output = errorText;
-                io.to(data.room).emit('output-update', errorText);
-                return;
-            }
+    // simple deny-list
+    const forbidden = [/import\\s+os/, /import\\s+sys/, /import\\s+subprocess/, /\\bexec\\s*\\(/, /\\beval\\s*\\(/, /\\bopen\\s*\\(/];
+    if (forbidden.some((re) => re.test(data.code))) {
+      const msg = "Security Error: File system and shell access are disabled.";
+      roomData.output = msg;
+      io.to(room).emit('output-update', msg);
+      return;
+    }
 
-            // Save to temp file
-            const tempFile = `temp_${Date.now()}.py`;
-            fs.writeFileSync(tempFile, data.code);
+    const tempDir = fs.mkdtempSync('cspro-');
+    const tempFile = \`\${tempDir}/main.py\`;
+    fs.writeFileSync(tempFile, data.code);
 
-            // Execute Python
-            // Timeout set to somthing seconds to prevent infinite loops
-exec(`python3 ${tempFile}`, { timeout: 200000000000000000000000000000000 }, (error, stdout, stderr) => {
+    const child = exec(\`python3 -I \${tempFile}\`, { maxBuffer: MAX_OUTPUT_BYTES });
+    runningProcs.set(room, child);
 
-                let result = '';
-                if (error) {
-                    // Check if it was a timeout
-                    if (error.signal === 'SIGTERM') {
-                        result = "Error: Execution timed out (Loop too long?)";
-                    } else {
-                        result = stderr || error.message;
-                    }
-                } else {
-                    result = stdout;
-                }
+    let collected = '';
+    const sendChunk = (chunk) => {
+      if (!chunk) return;
+      collected += chunk;
+      if (collected.length > MAX_OUTPUT_BYTES) {
+        collected = collected.slice(0, MAX_OUTPUT_BYTES) + "\\n[output truncated]";
+        child.kill('SIGTERM');
+      }
+      roomData.output = collected;
+      io.to(room).emit('output-update', collected);
+    };
 
-                // Cleanup file
-                if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+    child.stdout.on('data', sendChunk);
+    child.stderr.on('data', sendChunk);
 
-                // Send result back to room
-                roomData.output = result;
-                io.to(data.room).emit('output-update', result);
-            });
-        });
-
+    child.on('close', () => {
+      runningProcs.delete(room);
+      fs.rm(tempDir, { recursive: true, force: true }, () => {});
+      io.to(room).emit('output-update', roomData.output || "Finished.");
     });
+
+    child.on('error', (err) => {
+      runningProcs.delete(room);
+      roomData.output = err.message;
+      io.to(room).emit('output-update', err.message);
+    });
+  });
+
+  socket.on('stop-code', ({ room }) => {
+    const proc = runningProcs.get(room);
+    if (proc) {
+      proc.kill('SIGTERM');
+      runningProcs.delete(room);
+      const msg = "Execution stopped by user.";
+      rooms[room].output = msg;
+      io.to(room).emit('output-update', msg);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    const room = socket.data.room;
+    const user = socket.data.user;
+    if (room && rooms[room]) {
+      const leaveMsg = { user: 'System', text: \`\${user || 'A user'} left.\` };
+      rooms[room].messages.push(leaveMsg);
+      io.to(room).emit('chat-msg', leaveMsg);
+    }
+    const proc = runningProcs.get(room);
+    if (proc) proc.kill('SIGTERM');
+    runningProcs.delete(room);
+  });
 });
 
 server.listen(PORT, () => {
-    console.log(`Python Station running on port ${PORT}`);
+    console.log(\`Python Station running on port \${PORT}\`);
 });
