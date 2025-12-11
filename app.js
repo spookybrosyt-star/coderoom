@@ -1,3 +1,6 @@
+I escaped the backticks in my previous reply; when rendered to a real file those backslashes make the JS invalid. Below is a **clean, fully corrected `app.js`** with normal backticks and string literals (no escaping needed). Replace your file entirely with this version and redeploy.
+
+```js
 /* 
    -------------------------------------------------------
    CODE STATION PRO - PYTHON & ROOMS
@@ -288,7 +291,7 @@ io.on('connection', (socket) => {
     socket.data.user = user;
     socket.emit('join-success', targetRoom);
 
-    const joinMsg = { user: 'System', text: \`\${user} joined.\` };
+    const joinMsg = { user: 'System', text: `${user} joined.` };
     targetRoom.messages.push(joinMsg);
     io.to(room).emit('chat-msg', joinMsg);
   });
@@ -321,7 +324,7 @@ io.on('connection', (socket) => {
     }
 
     // simple deny-list
-    const forbidden = [/import\\s+os/, /import\\s+sys/, /import\\s+subprocess/, /\\bexec\\s*\\(/, /\\beval\\s*\\(/, /\\bopen\\s*\\(/];
+    const forbidden = [/import\s+os/, /import\s+sys/, /import\s+subprocess/, /\bexec\s*\(/, /\beval\s*\(/, /\bopen\s*\(/];
     if (forbidden.some((re) => re.test(data.code))) {
       const msg = "Security Error: File system and shell access are disabled.";
       roomData.output = msg;
@@ -330,10 +333,10 @@ io.on('connection', (socket) => {
     }
 
     const tempDir = fs.mkdtempSync('cspro-');
-    const tempFile = \`\${tempDir}/main.py\`;
+    const tempFile = `${tempDir}/main.py`;
     fs.writeFileSync(tempFile, data.code);
 
-    const child = exec(\`python3 -I \${tempFile}\`, { maxBuffer: MAX_OUTPUT_BYTES });
+    const child = exec(`python3 -I ${tempFile}`, { maxBuffer: MAX_OUTPUT_BYTES });
     runningProcs.set(room, child);
 
     let collected = '';
@@ -341,7 +344,7 @@ io.on('connection', (socket) => {
       if (!chunk) return;
       collected += chunk;
       if (collected.length > MAX_OUTPUT_BYTES) {
-        collected = collected.slice(0, MAX_OUTPUT_BYTES) + "\\n[output truncated]";
+        collected = collected.slice(0, MAX_OUTPUT_BYTES) + "\n[output truncated]";
         child.kill('SIGTERM');
       }
       roomData.output = collected;
@@ -379,7 +382,7 @@ io.on('connection', (socket) => {
     const room = socket.data.room;
     const user = socket.data.user;
     if (room && rooms[room]) {
-      const leaveMsg = { user: 'System', text: \`\${user || 'A user'} left.\` };
+      const leaveMsg = { user: 'System', text: `${user || 'A user'} left.` };
       rooms[room].messages.push(leaveMsg);
       io.to(room).emit('chat-msg', leaveMsg);
     }
@@ -390,5 +393,8 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-    console.log(\`Python Station running on port \${PORT}\`);
+    console.log(`Python Station running on port ${PORT}`);
 });
+```
+
+**Why the error happened:** I had escaped backticks (`\``) in the server code lines; outside a string that makes an invalid token. This version uses plain backticks and standard strings, so it parses correctly on Node 25. Redeploy with this file and it should start cleanly.
