@@ -18,8 +18,8 @@ const PORT = process.env.PORT || 3000;
 
 // --- STATE ---
 const rooms = {};
-const PY_TEMPLATE  = "# Python 3 environment\nprint('Hello from Code Station!')\n";
-const JS_TEMPLATE  = "console.log('Hello from Code Station (Node)!');\n";
+const PY_TEMPLATE = "# Python 3 environment\nprint('Hello from Code Station!')\n";
+const JS_TEMPLATE = "console.log('Hello from Code Station (Node)!');\n";
 const HTML_TEMPLATE = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Preview</title></head>
 <body style="font-family:sans-serif;"><h1>Hello from Code Station!</h1></body></html>`;
@@ -54,17 +54,14 @@ input,select{width:100%;padding:10px;background:#1e1e2e;border:1px solid #45475a
 #main-split{display:flex;height:calc(100vh - 46px);}
 #code-panel{flex:2;display:flex;flex-direction:column;border-right:1px solid #313244;min-width:0;}
 #chat-panel{flex:1;min-width:280px;display:flex;flex-direction:column;background:#181825;}
-/* tabs */
 #tab-bar{display:flex;align-items:center;gap:6px;padding:8px 10px;background:#181825;border-bottom:1px solid #313244;overflow-x:auto;}
 .tab{padding:6px 10px;border-radius:6px;background:#313244;cursor:pointer;white-space:nowrap;font-size:0.9rem;}
 .tab.active{background:#89b4fa;color:#111;font-weight:600;}
 #add-tab{padding:6px 10px;border-radius:6px;background:#45475a;color:#cdd6f4;cursor:pointer;border:1px dashed #6c7086;}
-/* toolbar */
 #toolbar{display:flex;gap:10px;align-items:center;padding:8px 10px;background:#181825;border-bottom:1px solid #313244;}
 #run-btn{background:#a6e3a1;color:#111;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;font-weight:bold;font-family:'JetBrains Mono';}
 #stop-btn{background:#f38ba8;color:#111;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;font-weight:bold;font-family:'JetBrains Mono';}
 select.slim{padding:6px 8px;font-size:0.9rem;}
-/* editor/output container with resizer */
 #editor-output{flex:1;display:flex;flex-direction:column;min-height:0;}
 #code-editor{flex:1;background:#1e1e2e;color:#cdd6f4;border:none;padding:14px;font-family:'JetBrains Mono',monospace;font-size:15px;line-height:1.55;resize:none;outline:none;}
 #drag-bar{height:6px;cursor:row-resize;background:#181825;border-top:1px solid #313244;border-bottom:1px solid #313244;}
@@ -72,7 +69,6 @@ select.slim{padding:6px 8px;font-size:0.9rem;}
 .output-title{padding:8px 12px;font-size:0.78rem;color:#6c7086;text-transform:uppercase;border-bottom:1px solid #313244;}
 #output-text{flex:1;margin:0;padding:12px;font-family:'JetBrains Mono',monospace;font-size:13px;overflow-y:auto;color:#babbf1;white-space:pre-wrap;}
 #preview-frame{flex:1;border:none;width:100%;background:white;display:none;}
-/* chat */
 #messages{flex:1;overflow-y:auto;padding:12px;list-style:none;margin:0;display:flex;flex-direction:column;gap:8px;}
 .message{background:#313244;padding:8px 12px;border-radius:6px;font-size:0.9rem;}
 .sys-msg{color:#f9e2af;font-style:italic;font-size:0.8rem;text-align:center;}
@@ -161,7 +157,6 @@ const langSelect=document.getElementById('lang-select');
 const fileLabel=document.getElementById('file-label');
 const outputConsole=document.getElementById('output-console');
 const dragBar=document.getElementById('drag-bar');
-const editorOutput=document.getElementById('editor-output');
 
 function uid(){ return 'tab-' + Math.random().toString(36).slice(2,8) + Date.now().toString(36); }
 
@@ -209,7 +204,7 @@ socket.on('tabs-update',(serverTabs)=>{
   renderTabs(); loadActiveTab();
 });
 
-// --- chat ---
+// chat helpers
 function sendMessage(e){e.preventDefault();const inp=document.getElementById('msg-input');if(inp.value){socket.emit('send-msg',{room:currentRoom,user:currentUser,text:inp.value});inp.value='';}}
 function addMsg(msg){
   const li=document.createElement('li');
@@ -218,7 +213,7 @@ function addMsg(msg){
   messagesList.appendChild(li); messagesList.scrollTop=messagesList.scrollHeight;
 }
 
-// --- tabs ---
+// tabs
 function makeDefaultTab(){
   return {id:uid(),name:'main.py',lang:'python',code:PY_TEMPLATE,output:''};
 }
@@ -247,7 +242,7 @@ function changeLang(e){
   loadActiveTab();
 }
 
-// --- editor sync ---
+// editor sync
 editor.addEventListener('input',()=>{
   const t=tabs.find(t=>t.id===activeTabId); if(!t)return;
   t.code=editor.value;
@@ -274,7 +269,7 @@ function showOutput(lang,text){
   }
 }
 
-// --- run / stop ---
+// run / stop
 function runCode(){
   const t=tabs.find(t=>t.id===activeTabId); if(!t)return;
   t.output="Running...";
@@ -291,10 +286,10 @@ function stopCode(){
   socket.emit('stop-code',{room:currentRoom,tabId:t.id});
 }
 
-// --- tabs sync ---
+// tabs sync
 function syncTabs(){ socket.emit('tabs-sync',{room:currentRoom,tabs}); }
 
-// --- resizable output ---
+// resizable output
 let isDragging=false,startY=0,startEditorH=0,startOutH=0;
 dragBar.addEventListener('mousedown',(e)=>{
   isDragging=true; startY=e.clientY;
@@ -407,7 +402,7 @@ io.on('connection',(socket)=>{
         if(!chunk)return;
         collected+=chunk;
         if(collected.length>MAX_OUTPUT_BYTES){
-          collected=collected.slice(0,MAX_OUTPUT_BYTES)+"\\n[output truncated]";
+          collected=collected.slice(0,MAX_OUTPUT_BYTES)+"\n[output truncated]";
           child.kill('SIGTERM');
         }
         tab.output=collected;
@@ -455,4 +450,4 @@ io.on('connection',(socket)=>{
   });
 });
 
-server.listen(PORT,()=>console.log(\`Code Station running on port \${PORT}\`));
+server.listen(PORT,()=>console.log(`Code Station running on port ${PORT}`));
