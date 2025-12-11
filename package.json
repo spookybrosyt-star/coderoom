@@ -1,3 +1,16 @@
-git add .
-git commit -m "Add package.json"
-git push
+{
+  "name": "code-station-pro",
+  "version": "1.0.0",
+  "description": "Real-time coding collaboration",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
